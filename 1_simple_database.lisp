@@ -5,6 +5,8 @@
     #:coalton-prelude)
   (:local-nicknames
    (#:vec #:coalton-library/vector)
+   (#:lst #:coalton-library/list)
+   (#:cel #:coalton-library/cell)
    (#:str #:coalton-library/string)))
 (in-package :practical-coalton.simple-database)
 
@@ -39,17 +41,26 @@
   
   (repr :transparent)
   (define-type Database 
-    (Database (Vector CD)))
+    (Database (Cell (List CD))))
+  
+  (declare from-cds ((List CD) -> Database))
+  (define (from-cds cd-list)
+    (Database (cel:new cd-list)))
+  
+  (declare cds (Database -> (List CD)))
+  (define (cds db)
+    (match db
+      ((Database cds-cell) (cel:read cds-cell))))
   
   (declare new-database (Unit -> Database))
   (define (new-database)
-    (Database (vec:new)))
+    (Database (cel:new Nil)))
   
   (declare add-record (Database -> CD -> Database))
   (define (add-record db cd)
     (match db
       ((Database cds)
-        (vec:push! cd cds)
+        (cel:push! cds cd)
         db)))
   
   (declare dump-cd (CD -> Unit))
@@ -61,11 +72,11 @@
        (traceobject "rating" rating)
        (traceobject "ripped" ripped))))
 
-  (declare dump-db (Database -> Unit))ti
+  (declare dump-db (Database -> Unit))
   (define (dump-db db)
     (match db
       ((Database cds)
-       (for cd in cds
+       (for cd in (cel:read cds)
             (dump-cd cd)
             (trace "--"))))
     Unit)
@@ -87,25 +98,27 @@
   
   (declare save-db (Database -> String -> Database))
   (define (save-db db filename)
-    (lisp Database (db filename)
-      (cl:with-open-file (out filename
-                              :direction :output
-                              :if-exists :supersede)
-        (cl:with-standard-io-syntax
-          (cl:print db out)))))
+    (let ((cd-list (cds db)))
+      (lisp :a (cd-list filename)
+        (cl:with-open-file (out filename
+                                :direction :output
+                                :if-exists :supersede)
+          (cl:with-standard-io-syntax
+            (cl:print cd-list out)))))
+    db)
   
   (declare load-db (String -> Database))
   (define (load-db filename)
-    (lisp Database (filename)
-      (convert-simple-vector
+    (from-cds
+      (lisp (List CD) (filename)
         (cl:with-open-file (in filename)
           (cl:with-standard-io-syntax
             (cl:read in))))))
   
-  (declare select ((CD -> Boolean) -> Database -> (Vector CD)))
-  (define (select selector-fn db)
-    (match db
-      ((Database cds) cds)))
+  ; (declare select ((CD -> Boolean) -> Database -> (Vector CD)))
+  ; (define (select selector-fn db)
+  ;   (match db
+  ;     ((Database cds) cds)))
   )
 
 (coalton
@@ -113,9 +126,3 @@
 
 (coalton
   (load-db "cds.db"))
-
-(cl:with-open-file (out "vec.txt" :direction :output :if-exists :supersede)
-  (cl:with-standard-io-syntax (cl:print #(1 2 3 4) out)))
-
-(cl:type-of (cl:with-open-file (in "vec.txt")
-  (cl:with-standard-io-syntax (cl:read in))))
