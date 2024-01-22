@@ -1,4 +1,5 @@
 (in-package :cl-user)
+(ql:quickload "coalton")
 (defpackage :practical-coalton.simple-database
   (:use
     #:coalton
@@ -11,13 +12,6 @@
 (in-package :practical-coalton.simple-database)
 
 ; (named-readtables:in-readtable coalton:coalton)
-
-(cl:defun convert-simple-vector (simple-vector)
-  (cl:make-array (cl:length simple-vector)
-            :element-type (cl:array-element-type simple-vector)
-            :initial-contents simple-vector
-            :adjustable cl:t
-            :fill-pointer cl:t))
 
 (coalton-toplevel
   (declare prompt-read (String -> String))
@@ -115,14 +109,38 @@
           (cl:with-standard-io-syntax
             (cl:read in))))))
   
-  ; (declare select ((CD -> Boolean) -> Database -> (Vector CD)))
-  ; (define (select selector-fn db)
-  ;   (match db
-  ;     ((Database cds) cds)))
+  (declare with-title (String -> (CD -> Boolean)))
+  (define (with-title title)
+    (fn (cd) (== title (.title cd))))
+  
+  (declare with-artist (String -> (CD -> Boolean)))
+  (define (with-artist artist)
+    (fn (cd) (== artist (.artist cd))))
+  
+  (declare with-rating (Integer -> (CD -> Boolean)))
+  (define (with-rating rating)
+    (fn (cd) (== rating (.rating cd))))
+  
+  (declare with-ripped (Boolean -> (CD -> Boolean)))
+  (define (with-ripped ripped)
+    (fn (cd) (== ripped (.ripped cd))))
+      
+  (declare select (Database -> (CD -> Boolean) -> (List CD)))
+  (define (select db selector-fn)
+    (lst:filter selector-fn (cds db)))
+
+  (declare where ((List (CD -> Boolean)) -> CD -> Boolean))
+  (define (where selectors cd)
+    (lst:all (fn (f) (f cd)) selectors))
+  
   )
 
 (coalton
   (save-db (add-cds (new-database)) "cds.db"))
 
 (coalton
-  (load-db "cds.db"))
+  (select 
+    (load-db "cds.db")
+    (where (make-list
+      (with-artist "Dua Lipa")
+      (with-ripped False)))))
