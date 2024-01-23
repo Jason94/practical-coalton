@@ -15,46 +15,11 @@
    (#:str #:coalton-library/string)))
 (in-package :practical-coalton.simple-database)
 
-; (named-readtables:in-readtable coalton:coalton)
-
-; (cl:defmacro define-with-attribute (struct-type attr attr-type)
-;   (cl:let ((accessor-keyword (cl:intern (cl:concatenate 'cl:string
-;                                                         (cl:string '#:.)
-;                                                         (cl:string attr))))
-;            (function-keyword (cl:intern (cl:concatenate 'cl:string
-;                                                         (cl:string '#:with-)
-;                                                         (cl:string attr)))))
-;     (with-gensyms (attr-variable cd-variable)
-;       `(progn
-;         (declare ,function-keyword (,attr-type -> (,struct-type -> Boolean)))
-;         (define (,function-keyword ,attr-variable)
-;           (fn (,cd-variable) (== ,attr-variable (,accessor-keyword ,cd-variable))))))))
-
-;   (declare where ((List (CD -> Boolean)) -> CD -> Boolean))
-;   (define (where selectors cd)
-;     (lst:all (fn (f) (f cd)) selectors))
-
-  ; (declare with-title (String -> (CD -> Boolean)))
-  ; (define (with-title title)
-  ;   (fn (cd) (== title (.title cd))))
-  
-  ; (declare with-artist (String -> (CD -> Boolean)))
-  ; (define (with-artist artist)
-  ;   (fn (cd) (== artist (.artist cd))))
-  
-  ; (declare with-rating (Integer -> (CD -> Boolean)))
-  ; (define (with-rating rating)
-  ;   (fn (cd) (== rating (.rating cd))))
-  
-  ; (declare with-ripped (Boolean -> (CD -> Boolean)))
-  ; (define (with-ripped ripped)
-  ;   (fn (cd) (== ripped (.ripped cd))))
+(cl:defun keyword-to-struct-accessor (keyword)
+  (cl:intern (cl:concatenate 'cl:string (cl:string '#:.) (cl:string keyword))))
 
 (cl:defun comparison-clause (attr-keyword value var-sym)
-  (cl:let ((accessor-sym (cl:intern (cl:concatenate 'cl:string
-                                                    (cl:string '#:.)
-                                                    (cl:string attr-keyword)))))
-    `(== ,value (,accessor-sym ,var-sym))))
+    `(== ,value (,(keyword-to-struct-accessor attr-keyword) ,var-sym)))
 
 (cl:defun comparison-clauses (var-sym clauses)
   (cl:loop while clauses
@@ -66,6 +31,15 @@
   (with-gensyms (cd-sym)
     `(fn (,cd-sym)
        (and ,@(comparison-clauses cd-sym clauses)))))
+
+(cl:defmacro to (cl:&key title artist rating (ripped nil ripped-p))
+  (with-gensyms (cd-sym)
+    `(fn (,cd-sym)
+      (CD
+        ,(cl:if title title `(.title ,cd-sym))
+        ,(cl:if artist artist `(.artist ,cd-sym))
+        ,(cl:if rating rating `(.rating ,cd-sym))
+        ,(cl:if ripped-p ripped `(.ripped ,cd-sym))))))
 
 (coalton-toplevel
   (declare prompt-read (String -> String))
@@ -120,12 +94,10 @@
     (traceobject "ripped" (.ripped cd)))
 
   (declare dump-db (Database -> Unit))
-  (define (dump-db db)
-    (match db
-      ((Database cd-data)
-       (for cd in (cel:read cd-data)
-            (dump-cd cd)
-            (trace "--"))))
+  (define (dump-db (Database cd-data))
+    (for cd in (cel:read cd-data)
+        (dump-cd cd)
+        (trace "--"))
     Unit)
   
   (declare prompt-for-cd (Unit -> CD))
@@ -177,10 +149,19 @@
       (map (fn (cd) (if (selector-fn cd)
                       (update-fn cd)
                       cd))
-            (cds db)))
+           (cds db)))
     db)
 
   )
+
+; (coalton
+;   (load-db "cds.db"))
+
+; (coalton
+;   (update!
+;     (load-db "cds.db")
+;     (where :artist "Dua Lipa")
+;     (to :ripped True :rating 1)))
 
 ; (coalton-toplevel
 ;   (declare set-ripped (Boolean -> CD -> CD))
@@ -190,10 +171,10 @@
 ; (coalton
 ;   (save-db (add-cds (new-database)) "cds.db"))
 
-(coalton
-  (select (load-db "cds.db")
-          (where :artist "Dua Lipa" :ripped False)))
+; (coalton
+;   (select (load-db "cds.db")
+;           (where :ripped True)))
 
-(coalton
-  (delete! (load-db "cds.db")
-           (where :artist "Dua Lipa" :ripped False)))
+; (coalton
+;   (delete! (load-db "cds.db")
+;            (where :artist "Dua Lipa" :ripped False)))
