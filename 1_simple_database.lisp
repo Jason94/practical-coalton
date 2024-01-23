@@ -1,9 +1,13 @@
 (in-package :cl-user)
 (ql:quickload "coalton")
+(ql:quickload "alexandria")
 (defpackage :practical-coalton.simple-database
   (:use
     #:coalton
     #:coalton-prelude)
+  (:import-from
+   #:alexandria
+   :with-gensyms)
   (:local-nicknames
    (#:vec #:coalton-library/vector)
    (#:lst #:coalton-library/list)
@@ -12,6 +16,35 @@
 (in-package :practical-coalton.simple-database)
 
 ; (named-readtables:in-readtable coalton:coalton)
+
+(cl:defmacro define-with-attribute (struct-type attr attr-type)
+  (cl:let ((accessor-keyword (cl:intern (cl:concatenate 'cl:string
+                                                        (cl:string '#:.)
+                                                        (cl:string attr))))
+           (function-keyword (cl:intern (cl:concatenate 'cl:string
+                                                        (cl:string '#:with-)
+                                                        (cl:string attr)))))
+    (with-gensyms (attr-variable cd-variable)
+      `(progn
+        (declare ,function-keyword (,attr-type -> (,struct-type -> Boolean)))
+        (define (,function-keyword ,attr-variable)
+          (fn (,cd-variable) (== ,attr-variable (,accessor-keyword ,cd-variable))))))))
+
+  ; (declare with-title (String -> (CD -> Boolean)))
+  ; (define (with-title title)
+  ;   (fn (cd) (== title (.title cd))))
+  
+  ; (declare with-artist (String -> (CD -> Boolean)))
+  ; (define (with-artist artist)
+  ;   (fn (cd) (== artist (.artist cd))))
+  
+  ; (declare with-rating (Integer -> (CD -> Boolean)))
+  ; (define (with-rating rating)
+  ;   (fn (cd) (== rating (.rating cd))))
+  
+  ; (declare with-ripped (Boolean -> (CD -> Boolean)))
+  ; (define (with-ripped ripped)
+  ;   (fn (cd) (== ripped (.ripped cd))))
 
 (coalton-toplevel
   (declare prompt-read (String -> String))
@@ -59,12 +92,10 @@
   
   (declare dump-cd (CD -> Unit))
   (define (dump-cd cd)
-    (match cd
-      ((CD title artist rating ripped)
-       (traceobject "title" title)
-       (traceobject "artist" artist)
-       (traceobject "rating" rating)
-       (traceobject "ripped" ripped))))
+    (traceobject "title" (.title cd))
+    (traceobject "artist" (.artist cd))
+    (traceobject "rating" (.rating cd))
+    (traceobject "ripped" (.ripped cd)))
 
   (declare dump-db (Database -> Unit))
   (define (dump-db db)
@@ -109,21 +140,10 @@
           (cl:with-standard-io-syntax
             (cl:read in))))))
   
-  (declare with-title (String -> (CD -> Boolean)))
-  (define (with-title title)
-    (fn (cd) (== title (.title cd))))
-  
-  (declare with-artist (String -> (CD -> Boolean)))
-  (define (with-artist artist)
-    (fn (cd) (== artist (.artist cd))))
-  
-  (declare with-rating (Integer -> (CD -> Boolean)))
-  (define (with-rating rating)
-    (fn (cd) (== rating (.rating cd))))
-  
-  (declare with-ripped (Boolean -> (CD -> Boolean)))
-  (define (with-ripped ripped)
-    (fn (cd) (== ripped (.ripped cd))))
+  (define-with-attribute CD :title String)
+  (define-with-attribute CD :artist String)
+  (define-with-attribute CD :rating Integer)
+  (define-with-attribute CD :ripped Boolean)
       
   (declare select (Database -> (CD -> Boolean) -> (List CD)))
   (define (select db selector-fn)
@@ -135,12 +155,12 @@
   
   )
 
-(coalton
-  (save-db (add-cds (new-database)) "cds.db"))
+; (coalton
+;   (save-db (add-cds (new-database)) "cds.db"))
 
 (coalton
   (select 
     (load-db "cds.db")
     (where (make-list
-      (with-artist "Dua Lipa")
-      (with-ripped False)))))
+      (with-artist "Dua Lipa")))))
+      ; (with-ripped False)))))
