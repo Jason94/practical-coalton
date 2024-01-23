@@ -17,18 +17,22 @@
 
 ; (named-readtables:in-readtable coalton:coalton)
 
-(cl:defmacro define-with-attribute (struct-type attr attr-type)
-  (cl:let ((accessor-keyword (cl:intern (cl:concatenate 'cl:string
-                                                        (cl:string '#:.)
-                                                        (cl:string attr))))
-           (function-keyword (cl:intern (cl:concatenate 'cl:string
-                                                        (cl:string '#:with-)
-                                                        (cl:string attr)))))
-    (with-gensyms (attr-variable cd-variable)
-      `(progn
-        (declare ,function-keyword (,attr-type -> (,struct-type -> Boolean)))
-        (define (,function-keyword ,attr-variable)
-          (fn (,cd-variable) (== ,attr-variable (,accessor-keyword ,cd-variable))))))))
+; (cl:defmacro define-with-attribute (struct-type attr attr-type)
+;   (cl:let ((accessor-keyword (cl:intern (cl:concatenate 'cl:string
+;                                                         (cl:string '#:.)
+;                                                         (cl:string attr))))
+;            (function-keyword (cl:intern (cl:concatenate 'cl:string
+;                                                         (cl:string '#:with-)
+;                                                         (cl:string attr)))))
+;     (with-gensyms (attr-variable cd-variable)
+;       `(progn
+;         (declare ,function-keyword (,attr-type -> (,struct-type -> Boolean)))
+;         (define (,function-keyword ,attr-variable)
+;           (fn (,cd-variable) (== ,attr-variable (,accessor-keyword ,cd-variable))))))))
+
+;   (declare where ((List (CD -> Boolean)) -> CD -> Boolean))
+;   (define (where selectors cd)
+;     (lst:all (fn (f) (f cd)) selectors))
 
   ; (declare with-title (String -> (CD -> Boolean)))
   ; (define (with-title title)
@@ -45,6 +49,23 @@
   ; (declare with-ripped (Boolean -> (CD -> Boolean)))
   ; (define (with-ripped ripped)
   ;   (fn (cd) (== ripped (.ripped cd))))
+
+(cl:defun comparison-clause (attr-keyword value var-sym)
+  (cl:let ((accessor-sym (cl:intern (cl:concatenate 'cl:string
+                                                    (cl:string '#:.)
+                                                    (cl:string attr-keyword)))))
+    `(== ,value (,accessor-sym ,var-sym))))
+
+(cl:defun comparison-clauses (var-sym clauses)
+  (cl:loop while clauses
+    collecting (comparison-clause (cl:pop clauses)
+                                  (cl:pop clauses)
+                                  var-sym)))
+
+(cl:defmacro where (cl:&rest clauses)
+  (with-gensyms (cd-sym)
+    `(fn (,cd-sym)
+       (and ,@(comparison-clauses cd-sym clauses)))))
 
 (coalton-toplevel
   (declare prompt-read (String -> String))
@@ -70,14 +91,17 @@
   (define-type Database 
     (Database (Cell (List CD))))
   
+  (declare cd-data (Database -> (Cell (List CD))))
+  (define (cd-data (Database cd-cell))
+    cd-cell)
+
   (declare from-cds ((List CD) -> Database))
   (define (from-cds cd-list)
     (Database (cel:new cd-list)))
   
   (declare cds (Database -> (List CD)))
-  (define (cds db)
-    (match db
-      ((Database cds-cell) (cel:read cds-cell))))
+  (define (cds (Database cds-data))
+    (cel:read cds-data))
   
   (declare new-database (Unit -> Database))
   (define (new-database)
@@ -85,10 +109,8 @@
   
   (declare add-record (Database -> CD -> Database))
   (define (add-record db cd)
-    (match db
-      ((Database cds)
-        (cel:push! cds cd)
-        db)))
+    (cel:push! (cd-data db) cd)
+    db)
   
   (declare dump-cd (CD -> Unit))
   (define (dump-cd cd)
@@ -100,8 +122,8 @@
   (declare dump-db (Database -> Unit))
   (define (dump-db db)
     (match db
-      ((Database cds)
-       (for cd in (cel:read cds)
+      ((Database cd-data)
+       (for cd in (cel:read cd-data)
             (dump-cd cd)
             (trace "--"))))
     Unit)
@@ -139,28 +161,39 @@
         (cl:with-open-file (in filename)
           (cl:with-standard-io-syntax
             (cl:read in))))))
-  
-  (define-with-attribute CD :title String)
-  (define-with-attribute CD :artist String)
-  (define-with-attribute CD :rating Integer)
-  (define-with-attribute CD :ripped Boolean)
       
   (declare select (Database -> (CD -> Boolean) -> (List CD)))
   (define (select db selector-fn)
     (lst:filter selector-fn (cds db)))
-
-  (declare where ((List (CD -> Boolean)) -> CD -> Boolean))
-  (define (where selectors cd)
-    (lst:all (fn (f) (f cd)) selectors))
+ 
+  (declare delete! (Database -> (CD -> Boolean) -> Database))
+  (define (delete! db selector-fn)
+    (cel:write! (cd-data db) (lst:remove-if selector-fn (cds db)))
+    db)
   
+  (declare update! (Database -> (CD -> Boolean) -> (CD -> CD) -> Database))
+  (define (update! db selector-fn update-fn)
+    (cel:write! (cd-data db)
+      (map (fn (cd) (if (selector-fn cd)
+                      (update-fn cd)
+                      cd))
+            (cds db)))
+    db)
+
   )
+
+; (coalton-toplevel
+;   (declare set-ripped (Boolean -> CD -> CD))
+;   (define (set-ripped! ripped cd)
+;     (CD ()))
 
 ; (coalton
 ;   (save-db (add-cds (new-database)) "cds.db"))
 
 (coalton
-  (select 
-    (load-db "cds.db")
-    (where (make-list
-      (with-artist "Dua Lipa")))))
-      ; (with-ripped False)))))
+  (select (load-db "cds.db")
+          (where :artist "Dua Lipa" :ripped False)))
+
+(coalton
+  (delete! (load-db "cds.db")
+           (where :artist "Dua Lipa" :ripped False)))
