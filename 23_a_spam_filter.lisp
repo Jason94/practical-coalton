@@ -1,6 +1,6 @@
 (in-package :cl-user)
-(ql:quickload "coalton")
-(ql:quickload "cl-ppcre")
+;; (ql:quickload "coalton")
+;; (ql:quickload "cl-ppcre")
 (defpackage :practical-coalton.spam-filter
   (:use
     #:coalton
