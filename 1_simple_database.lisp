@@ -48,7 +48,7 @@
       (cl:format cl:*query-io* "~a: " prompt)
       (cl:force-output cl:*query-io*)
       (cl:read-line cl:*query-io*)))
-  
+
   (declare prompt-y-n (String -> Boolean))
   (define (prompt-y-n prompt)
     (lisp Boolean (prompt)
@@ -60,11 +60,11 @@
     (artist String)
     (rating Integer)
     (ripped Boolean))
-  
+
   (repr :transparent)
-  (define-type Database 
+  (define-type Database
     (Database (Cell (List CD))))
-  
+
   (declare cd-data (Database -> (Cell (List CD))))
   (define (cd-data (Database cd-cell))
     cd-cell)
@@ -72,20 +72,20 @@
   (declare from-cds ((List CD) -> Database))
   (define (from-cds cd-list)
     (Database (cel:new cd-list)))
-  
+
   (declare cds (Database -> (List CD)))
   (define (cds (Database cds-data))
     (cel:read cds-data))
-  
+
   (declare new-database (Unit -> Database))
   (define (new-database)
     (Database (cel:new Nil)))
-  
+
   (declare add-record (Database -> CD -> Database))
   (define (add-record db cd)
     (cel:push! (cd-data db) cd)
     db)
-  
+
   (declare dump-cd (CD -> Unit))
   (define (dump-cd cd)
     (traceobject "title" (.title cd))
@@ -99,7 +99,7 @@
         (dump-cd cd)
         (trace "--"))
     Unit)
-  
+
   (declare prompt-for-cd (Unit -> CD))
   (define (prompt-for-cd)
     (CD
@@ -107,14 +107,14 @@
       (prompt-read "Artist")
       (with-default 0 (str:parse-int (prompt-read "Rating")))
       (prompt-y-n "Ripped")))
-  
+
   (declare add-cds (Database -> Database))
   (define (add-cds db)
     (add-record db (prompt-for-cd))
     (if (prompt-y-n "Another?")
           (add-cds db)
         db))
-  
+
   (declare save-db (Database -> String -> Database))
   (define (save-db db filename)
     (let ((cd-list (cds db)))
@@ -125,7 +125,7 @@
           (cl:with-standard-io-syntax
             (cl:print cd-list out)))))
     db)
-  
+
   (declare load-db (String -> Database))
   (define (load-db filename)
     (from-cds
@@ -133,16 +133,16 @@
         (cl:with-open-file (in filename)
           (cl:with-standard-io-syntax
             (cl:read in))))))
-      
+
   (declare select (Database -> (CD -> Boolean) -> (List CD)))
   (define (select db selector-fn)
     (lst:filter selector-fn (cds db)))
- 
+
   (declare delete! (Database -> (CD -> Boolean) -> Database))
   (define (delete! db selector-fn)
     (cel:write! (cd-data db) (lst:remove-if selector-fn (cds db)))
     db)
-  
+
   (declare update! (Database -> (CD -> Boolean) -> (CD -> CD) -> Database))
   (define (update! db selector-fn update-fn)
     (cel:write! (cd-data db)
