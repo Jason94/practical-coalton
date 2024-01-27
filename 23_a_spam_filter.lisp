@@ -17,7 +17,7 @@
 ; (named-readtables:in-readtable coalton:coalton)
 
 (coalton-toplevel
-  
+
   ;;
   ;; Coalton wrappers around Lisp functions
   ;;
@@ -48,16 +48,16 @@
      ((<= score MAX-HAM-SCORE) Ham)
      ((>= score MIN-SPAM-SCORE) Spam)
      (True Unsure)))
-  
+
   (define-struct Word-Feature
     (word String)
     (spam-count (Cell Integer))
     (ham-count (Cell Integer)))
-  
+
   (declare new-feature (String -> Word-Feature))
   (define (new-feature word)
     (Word-Feature word 0 0))
-  
+
 )
 
 (coalton-toplevel
@@ -71,12 +71,12 @@
   (declare db-table (Unit -> (Hashtable String Word-Feature)))
   (define (db-table)
     (cel:read FEATURE-DATABASE))
-  
+
   (define (clear-database!)
     (cel:write! FEATURE-DATABASE (htbl:new))
     (cel:write! TOTAL-HAMS 0)
     (cel:write! TOTAL-SPAMS 0))
-  
+
   (declare intern-feature! (String -> Word-Feature))
   (define (intern-feature! word)
     (match (htbl:get (db-table) word)
@@ -85,15 +85,15 @@
        (let ((feature (new-feature word)))
          (htbl:set! (db-table) word feature)
          feature))))
-  
+
   (declare untrained-p (Word-Feature -> Boolean))
   (define (untrained-p feature)
     (and (ath:zero? (.ham-count feature))
          (ath:zero? (.spam-count feature))))
-  
+
   )
 
-    
+
 (coalton-toplevel
   ;;
   ;; Spam Training
@@ -102,11 +102,11 @@
   (declare extract-words (String -> (List String)))
   (define (extract-words text)
     (lst:remove-duplicates (all-matches "[a-zA-Z]{3,}" text)))
-  
+
   (declare extract-features! (String -> (List Word-Feature)))
   (define (extract-features! text)
     (map intern-feature! (extract-words text)))
-  
+
   (declare increment-count! (Word-Feature -> Classification -> Word-Feature))
   (define (increment-count! feature type)
     (match type
@@ -114,7 +114,7 @@
       ((Spam) (cel:increment! (.spam-count feature)))
       ((Unsure) 0))
     feature)
-  
+
   (declare increment-total-count! (Classification -> Integer))
   (define (increment-total-count! type)
     (match type
@@ -128,7 +128,7 @@
       (increment-count! feature type))
     (increment-total-count! type)
     Unit)
-  
+
   )
 
 (coalton-toplevel
@@ -137,7 +137,7 @@
   ;;
 
   (declare spam-probability (Word-Feature -> Double-Float))
-  (define (spam-probability feature)  
+  (define (spam-probability feature)
     (let ((spam-frequency (rl:inexact/ (cel:read (.spam-count feature))
                                        (max 1 (cel:read TOTAL-SPAMS))))
           (ham-frequency (rl:inexact/ (cel:read (.ham-count feature))
@@ -174,7 +174,7 @@
     (inverse-chi-square
      (* -2 (fold + 0.0d0 (map ln probs)))
      (* 2 number-of-probs)))
-  
+
   (declare score ((List Word-Feature) -> Double-Float))
   (define (score features)
     (let ((spam-probs (cel:new Nil)) (ham-probs (cel:new Nil)) (n-probs (cel:new 0)))
@@ -197,7 +197,7 @@
   )
 
 (coalton-toplevel
-  
+
   (declare foobar (Double-Float -> Integer -> Double-Float))
   (define (foobar d n)
     (* d (fromInt n)))
