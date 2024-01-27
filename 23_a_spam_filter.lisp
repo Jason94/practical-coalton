@@ -10,6 +10,7 @@
     (#:lst #:coalton-library/list)
     (#:htbl #:coalton-library/hashtable)
     (#:rl #:coalton-library/math/real)
+    (#:int #:coalton-library/math/integral)
     (#:ath #:coalton-library/math/arith)))
 (in-package :practical-coalton.spam-filter)
 
@@ -143,23 +144,55 @@
                                       (max 1 (cel:read TOTAL-HAMS)))))
       (/ spam-frequency (+ spam-frequency ham-frequency))))
 
-  (declare bayesian-spam-probability (Word-Feature -> Double-Float -> Double-Float -> Double-Float))
-  (define (bayesian-spam-probability feature assumed-probability weight)
+  (define ASSUMED-PROBABILITY 0.5d0)
+  (define WEIGHT 1.0d0)
+
+  (declare bayesian-spam-probability (Word-Feature -> Double-Float))
+  (define (bayesian-spam-probability feature)
     (let ((basic-probability (spam-probability feature))
           (data-points (fromInt (+ (cel:read (.spam-count feature))
                                    (cel:read (.ham-count feature))))))
-      (/ (+ (* weight assumed-probability)
+      (/ (+ (* WEIGHT ASSUMED-PROBABILITY)
             (* data-points basic-probability))
-         (+ weight data-points))))
+         (+ WEIGHT data-points))))
 
-  (declare fisher (Integer -> Integer -> Double-Float))
+  (declare inverse-chi-square (Double-Float -> Integer -> Double-Float))
+  (define (inverse-chi-square value degrees-of-freedom)
+    (min
+      (lisp Double-Float (value degrees-of-freedom)
+        (cl:assert (cl:evenp degrees-of-freedom))
+        (cl:float
+          (cl:loop with m = (cl:/ value 2)
+            for i below (cl:/ degrees-of-freedom 2)
+            for prob = (cl:exp (cl:- m)) then (cl:* prob (cl:/ m i))
+            summing prob)
+          0.0d0))
+      1.0d0))
+
+  (declare fisher ((List Double-Float) -> Integer -> Double-Float))
   (define (fisher probs number-of-probs)
     (inverse-chi-square
-     (* -2 (log)))
+     (* -2 (fold + 0.0d0 (map ln probs)))
+     (* 2 number-of-probs)))
+  
+  (declare score ((List Word-Feature) -> Double-Float))
+  (define (score features)
+    (let ((spam-probs (cel:new Nil)) (ham-probs (cel:new Nil)) (n-probs (cel:new 0)))
+      (for feature in features
+        (unless (untrained-p feature)
+          (let ((spam-prob (bayesian-spam-probability feature)))
+            (cel:push! spam-probs spam-prob)
+            (cel:push! ham-probs (- 1.0d0 spam-prob))
+            (cel:increment! n-probs))
+          Unit))
+      (let ((h (- 1 (fisher (cel:read spam-probs) (cel:read n-probs))))
+            (s (- 1 (fisher (cel:read ham-probs) (cel:read n-probs)))))
+        (/ (+ (- 1 h) s) 2.0d0))))
 
-  ; (declare classify (String -> Double-Float))
-  ; (define (classify text)
-  ;   (classification (score (extract-features text))))
+
+  (declare classify (String -> Classification))
+  (define (classify text)
+    (classification (score (extract-features! text))))
 
   )
 
