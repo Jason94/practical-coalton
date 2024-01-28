@@ -98,7 +98,7 @@ Example:
   "Generates a comparison clause for the query DSL.
 
 Example:
-  
+
 (comparison-clause :rating 5 'cd) => `(== 5 (.rating cd))
 "
     `(== ,value (,(keyword-to-struct-accessor attr-keyword) ,var-sym)))
@@ -117,8 +117,8 @@ Creates an anonymous function that takes a CD and returns True if the
 CD matches the specified criteria.
 
 Example:
-  
-(where :rating 5 :artist ''Peter Siebel'') 
+
+(where :rating 5 :artist ''Peter Siebel'')
   => (fn (cd) (and (== 5 (.rating cd)) (== ''Peter Siebel'' (.artist cd))))
 "
   (with-gensyms (cd-sym)
@@ -133,8 +133,8 @@ the specified attributes updated. The attributes that are not specified
 are copied from the original CD.
 
 Example:
-  
-(to :ripped True :rating 1) 
+
+(to :ripped True :rating 1)
   => (fn (cd) (CD (.title cd) (.artist cd) 1 True))"
   (with-gensyms (cd-sym)
     `(fn (,cd-sym)
@@ -161,7 +161,7 @@ Example:
   (define (prompt-y-n prompt)
     (lisp Boolean (prompt)
       (cl:y-or-n-p (cl:format cl:nil "~a [y/n]: " prompt))))
-  
+
   (declare prompt-for-cd (Unit -> CD))
   (define (prompt-for-cd)
     (CD
@@ -176,7 +176,7 @@ Example:
     (if (prompt-y-n "Another?")
           (add-cds db)
         db))
-  
+
   (declare save-db (Database -> String -> Database))
   (define (save-db db filename)
     (let ((cd-list (cds db)))
