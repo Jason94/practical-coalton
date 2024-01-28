@@ -1,6 +1,6 @@
 ;; To load this file, you need to load Chapter 15 from the Practical
 ;; Common Lisp repository. The source code can be found at the link
-;; below. Then you can copy the Chapter 15 directory into 
+;; below. Then you can copy the Chapter 15 directory into
 ;; ~/quicklisp/local-projects and run (quickload "Chapter-15").
 ;; https://gigamonkeys.com/book/
 
@@ -24,6 +24,8 @@
    :directory-p
    :file-p))
 (in-package :practical-coalton.pathnames)
+
+(named-readtables:in-readtable coalton:coalton)
 
 ;; Port of Chapter 15 from Practical Common Lisp, by Peter Seibel,
 ;; to Coalton.
@@ -61,6 +63,11 @@ A nil return value is converted to None."
 
   (repr :native cl:pathname)
   (define-type Pathname)
+
+  (declare pathname->string (Pathname -> String))
+  (define (pathname->string pathname)
+    (lisp String (pathname)
+      (cl:write-to-string pathname)))
 
   (define-instance (Path Pathname))
 
@@ -116,24 +123,43 @@ A nil return value is converted to None."
       ((Ok pth)
        (lisp :a (pth)
          (pth:pathname-as-file pth)))))
-  
+
   )
 
 (coalton-toplevel
 
   ;; TODO: Are coalton functions always guaranteed to be callable by APPLY
   ;; in Common Lisp?
-  (declare walk-directory-if ((Path :a) => :a -> (Pathname -> :b) -> Boolean -> (Pathname -> Boolean) -> Unit))
+  (declare walk-directory-if (String -> (Pathname -> :b) -> Boolean -> (Pathname -> Boolean) -> Unit))
   (define (walk-directory-if dirname fn include-dirs test-fn)
     (lisp :t (dirname fn include-dirs test-fn)
-      (pth:walk-directory dirname fn :directories include-dirs :test test-fn))
+      (cl:let ((lisp-fn (cl:lambda (fn pthnm)
+                          (coalton (fn (lisp :a (pthnm)
+                                           pthnm))))))
+        (pth:walk-directory dirname (cl:lambda (pthnm)
+                                      (cl:print pthnm)))))
+    Unit)
+
+;                          :directories include-dirs :test test-fn))
+;    Unit)
       ; (cl:let ((lisp-fn (cl:lambda (pthnm)
       ;                     (coalton (fn (lisp Pathname () pthnm)))))
       ;          (lisp-test (cl:lambda (pthnm)
       ;                       (coalton (test-fn (lisp Pathname () pthnm))))))
       ;   (pth:walk-directory dirname lisp-fn :directories include-dirs :test lisp-test)))
-    Unit)
   )
+
+(coalton-toplevel
+  (declare foo-pth (Pathname -> Unit))
+  (define (foo-pth pth)
+    (lisp :a (pth)
+      (cl:format cl:t "~a" pth))
+    Unit)
+
+  )
+
+(coalton
+ (walk-directory-if "." foo-pth False (fn (y) False)))
 
 ; (coalton
 ;  (do
