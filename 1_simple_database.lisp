@@ -1,6 +1,5 @@
+;; Make sure to load :coalton and :alexandria before loading this file.
 (in-package :cl-user)
-(ql:quickload "coalton")
-(ql:quickload "alexandria")
 (defpackage :practical-coalton.simple-database
   (:use
     #:coalton
@@ -15,44 +14,20 @@
    (#:str #:coalton-library/string)))
 (in-package :practical-coalton.simple-database)
 
-(cl:defun keyword-to-struct-accessor (keyword)
-  (cl:intern (cl:concatenate 'cl:string (cl:string '#:.) (cl:string keyword))))
+;;; Port of Chapter 3 from Practical Common Lisp, by Peter Seibel,
+;;; to Coalton.
+;;;
+;;; In PCL, the database is stored in a global variable. The functions
+;;; modifying the database write to that global. This is possible in
+;;; Coalton (by defining a CELL global variable), and we take that approach
+;;; in the port of chapter 23. In this chapter, we define a mutable Database
+;;; type, and each of the functions that read or write to a Database take
+;;; it as an argument.
 
-(cl:defun comparison-clause (attr-keyword value var-sym)
-    `(== ,value (,(keyword-to-struct-accessor attr-keyword) ,var-sym)))
-
-(cl:defun comparison-clauses (var-sym clauses)
-  (cl:loop while clauses
-    collecting (comparison-clause (cl:pop clauses)
-                                  (cl:pop clauses)
-                                  var-sym)))
-
-(cl:defmacro where (cl:&rest clauses)
-  (with-gensyms (cd-sym)
-    `(fn (,cd-sym)
-       (and ,@(comparison-clauses cd-sym clauses)))))
-
-(cl:defmacro to (cl:&key title artist rating (ripped nil ripped-p))
-  (with-gensyms (cd-sym)
-    `(fn (,cd-sym)
-      (CD
-        ,(cl:if title title `(.title ,cd-sym))
-        ,(cl:if artist artist `(.artist ,cd-sym))
-        ,(cl:if rating rating `(.rating ,cd-sym))
-        ,(cl:if ripped-p ripped `(.ripped ,cd-sym))))))
-
-(coalton-toplevel
-  (declare prompt-read (String -> String))
-  (define (prompt-read prompt)
-    (lisp String (prompt)
-      (cl:format cl:*query-io* "~a: " prompt)
-      (cl:force-output cl:*query-io*)
-      (cl:read-line cl:*query-io*)))
-
-  (declare prompt-y-n (String -> Boolean))
-  (define (prompt-y-n prompt)
-    (lisp Boolean (prompt)
-      (cl:y-or-n-p (cl:format cl:nil "~a [y/n]: " prompt)))))
+;;;
+;;; Define the types required to create a mutable database and basic
+;;; functions to work with them.
+;;;
 
 (coalton-toplevel
   (define-struct CD
@@ -98,8 +73,95 @@
     (for cd in (cel:read cd-data)
         (dump-cd cd)
         (trace "--"))
-    Unit)
+    Unit))
 
+;;;
+;;; Query DSL implemented as Common Lisp macros that generate Coalton code.
+;;;
+
+(cl:defun keyword-to-struct-accessor (keyword)
+  "Converts a keyword to a Coalton struct accessor.
+
+This is useful for converting keywords to Coalton struct accessors in the
+query DSL, like:
+
+(where :rating 8), in which :rating will eventually be transformed into
+(.rating cd) in the generated Coalton code.
+
+Example:
+
+(keyword-to-struct-accessor :title) => .TITLE
+"
+  (cl:intern (cl:concatenate 'cl:string (cl:string '#:.) (cl:string keyword))))
+
+(cl:defun comparison-clause (attr-keyword value var-sym)
+  "Generates a comparison clause for the query DSL.
+
+Example:
+  
+(comparison-clause :rating 5 'cd) => `(== 5 (.rating cd))
+"
+    `(== ,value (,(keyword-to-struct-accessor attr-keyword) ,var-sym)))
+
+(cl:defun comparison-clauses (var-sym clauses)
+  "Generates a list of comparison clauses for the query DSL."
+  (cl:loop while clauses
+    collecting (comparison-clause (cl:pop clauses)
+                                  (cl:pop clauses)
+                                  var-sym)))
+
+(cl:defmacro where (cl:&rest clauses)
+  "Provides a query DSL to select records from a database.
+
+Creates an anonymous function that takes a CD and returns True if the
+CD matches the specified criteria.
+
+Example:
+  
+(where :rating 5 :artist ''Peter Siebel'') 
+  => (fn (cd) (and (== 5 (.rating cd)) (== ''Peter Siebel'' (.artist cd))))
+"
+  (with-gensyms (cd-sym)
+    `(fn (,cd-sym)
+       (and ,@(comparison-clauses cd-sym clauses)))))
+
+(cl:defmacro to (cl:&key title artist rating (ripped nil ripped-p))
+  "Provides a query DSL to produce updated records for the database.
+
+Creates an anonymyous function that takes a CD and returns a new CD with
+the specified attributes updated. The attributes that are not specified
+are copied from the original CD.
+
+Example:
+  
+(to :ripped True :rating 1) 
+  => (fn (cd) (CD (.title cd) (.artist cd) 1 True))"
+  (with-gensyms (cd-sym)
+    `(fn (,cd-sym)
+      (CD
+        ,(cl:if title title `(.title ,cd-sym))
+        ,(cl:if artist artist `(.artist ,cd-sym))
+        ,(cl:if rating rating `(.rating ,cd-sym))
+        ,(cl:if ripped-p ripped `(.ripped ,cd-sym))))))
+
+;;;
+;;; Functions to ask the user for database input, and to save/load the
+;;; database to/from a file.
+;;;
+
+(coalton-toplevel
+  (declare prompt-read (String -> String))
+  (define (prompt-read prompt)
+    (lisp String (prompt)
+      (cl:format cl:*query-io* "~a: " prompt)
+      (cl:force-output cl:*query-io*)
+      (cl:read-line cl:*query-io*)))
+
+  (declare prompt-y-n (String -> Boolean))
+  (define (prompt-y-n prompt)
+    (lisp Boolean (prompt)
+      (cl:y-or-n-p (cl:format cl:nil "~a [y/n]: " prompt))))
+  
   (declare prompt-for-cd (Unit -> CD))
   (define (prompt-for-cd)
     (CD
@@ -114,7 +176,7 @@
     (if (prompt-y-n "Another?")
           (add-cds db)
         db))
-
+  
   (declare save-db (Database -> String -> Database))
   (define (save-db db filename)
     (let ((cd-list (cds db)))
@@ -132,8 +194,13 @@
       (lisp (List CD) (filename)
         (cl:with-open-file (in filename)
           (cl:with-standard-io-syntax
-            (cl:read in))))))
+            (cl:read in)))))))
 
+;;;
+;;; Functions to query the database using the DSL.
+;;;
+
+(coalton-toplevel
   (declare select (Database -> (CD -> Boolean) -> (List CD)))
   (define (select db selector-fn)
     (lst:filter selector-fn (cds db)))
@@ -150,31 +217,29 @@
                       (update-fn cd)
                       cd))
            (cds db)))
-    db)
+    db))
 
-  )
+;;;
+;;; Example code. These are Common Lisp functions that call Coalton code,
+;;; so they can be easily called from the REPL.
+;;;
 
-; (coalton
-;   (load-db "cds.db"))
+(cl:defun save-prompted-db ()
+  (coalton
+    (traceobject "Saved database to file:"
+      (save-db (add-cds (new-database)) "cds.db"))))
 
-; (coalton
-;   (update!
-;     (load-db "cds.db")
-;     (where :artist "Dua Lipa")
-;     (to :ripped True :rating 1)))
+(cl:defun load-and-update-snoop ()
+  (coalton
+    (traceobject "Database:"
+      (update!
+        (load-db "cds.db")
+        (where :artist "Snoop Dogg")
+        (to :ripped True :rating 5)))))
 
-; (coalton-toplevel
-;   (declare set-ripped (Boolean -> CD -> CD))
-;   (define (set-ripped! ripped cd)
-;     (CD ()))
-
-; (coalton
-;   (save-db (add-cds (new-database)) "cds.db"))
-
-; (coalton
-;   (select (load-db "cds.db")
-;           (where :ripped True)))
-
-; (coalton
-;   (delete! (load-db "cds.db")
-;            (where :artist "Dua Lipa" :ripped False)))
+(cl:defun prompt-and-select ()
+  (coalton
+    (traceobject "Ripped tracks with a perfect rating:"
+      (select
+        (add-cds (new-database))
+        (where :rating 10 :ripped True)))))
