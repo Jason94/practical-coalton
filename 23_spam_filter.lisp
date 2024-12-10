@@ -5,10 +5,15 @@
   (:use
    #:coalton
    #:coalton-prelude
+   #:coalton-library/list
    #:coalton-library/monad/state)
   (:import-from
    #:coalton-library/math/real
-   :inexact/)
+   :inexact/
+   :floor/)
+  (:import-from
+   #:coalton-library/math/arith
+   :negate)
   (:local-nicknames
    (#:m #:coalton-library/ord-map)
    (#:o #:coalton-library/optional)))
@@ -115,29 +120,37 @@
 
   (declare inverse-chi-square (Double-Float -> Integer -> Double-Float))
   (define (inverse-chi-square value degrees-of-freedom)
+    (lisp :a (degrees-of-freedom)
+      (cl:assert (cl:evenp degrees-of-freedom)))
+    (let m = (/ value 2))
     (min
-      
-      1.0)
+     (fold + 0 (map (the (Integer -> Double-Float)
+                         (fn (i) (* (exp (negate m))
+                                    (if (zero? i)
+                                        1
+                                        (pow (/ m (fromint i)) (fromint i))))))
+                    (range 0 (1- (floor/ degrees-of-freedom 2)))))
+      1.0d0))
 
   (declare fisher ((List Double-Float) -> Integer -> Double-Float))
   (define (fisher probs number-of-probs)
     (inverse-chi-square
-     (* -2 (fold + (map log probs)))
+     (* -2 (fold * 1d0 (map ln probs)))
      (* 2 number-of-probs)))
 
-  (declare score ((List WordFeature) -> Double-Float))
-  (define (score features)
+  (declare score (FeatureDatabase -> (List WordFeature) -> Double-Float))
+  (define (score feature-db features)
     (let ((sum-probs
            (fn (remaining spam-probs ham-probs number-of-probs)
              (match remaining
                ((Nil)
-                (let ((h (- 1 (fisher spam-probs number-of probs)))
+                (let ((h (- 1 (fisher spam-probs number-of-probs)))
                       (s (- 1 (fisher ham-probs number-of-probs))))
                   (/ (+ (- 1 h) s) 2.0d0)))
                ((Cons feature new-remaining)
                 (if (untrained? feature)
                     (sum-probs new-remaining spam-probs ham-probs number-of-probs)
-                    (let ((spam-prob (bayesian-spam-probability feature)))
+                    (let ((spam-prob (bayesian-spam-probability feature-db feature)))
                       (sum-probs new-remaining
                                  (Cons spam-prob spam-probs)
                                  (Cons (- 1.0d0 spam-prob) spam-probs)
@@ -145,6 +158,8 @@
       (sum-probs features Nil Nil 0))))
 
 (coalton-toplevel
+
+  (define-type-alias (SpamState :a) (ST FeatureDatabase :a))
 
   (declare intern-feature (String -> (ST FeatureDatabase WordFeature)))
   (define (intern-feature word)
