@@ -42,6 +42,10 @@
   (declare new-word-feature (String -> WordFeature))
   (define (new-word-feature word)
     (WordFeature word 0 0))
+  
+  (declare untrained? (WordFeature -> Boolean))
+  (define (untrained? feature)
+    (and (zero? (.spam-count feature)) (zero? (.ham-count feature))))
 
   (declare increment-feature (Classification -> WordFeature -> WordFeature))
   (define (increment-feature type feature)
@@ -77,16 +81,18 @@
      ((>= score MIN-SPAM-SCORE) Spam)
      (True Unsure)))
 
-  (declare classify (String -> Classification))
-  (define (classify _)
-    Ham)
+  ; (declare classify (String -> Classification))
+  ; (define (classify text)
+  ;   (classification (score (extract-features text))))
 
   (declare extract-words (String -> (List String)))
   (define (extract-words text)
     (lisp (List String) (text)
       (cl:delete-duplicates
         (cl-ppcre:all-matches-as-strings "[a-zA-Z]{3,}" text)
-        :test #'cl:string=)))
+        :test #'cl:string=))))
+
+(coalton-toplevel
 
   (declare spam-probability (FeatureDatabase -> WordFeature -> Double-Float))
   (define (spam-probability
@@ -99,13 +105,44 @@
   (declare %bayesian-spam-probability (Double-Float -> Double-Float -> FeatureDatabase -> WordFeature -> Double-Float))
   (define (%bayesian-spam-probability assumed-probability weight db feature)
     (let ((basic-probability (spam-probability db feature))
-          (data-points (+ (.spam-count feature) (.ham-count feature))))
-      ; (inexact/ (+ (* weight assumed-probability)
-      ;              (* data-points basic-probability))
-                (+ 0.2d0 basic-probability)))
+          (data-points (fromint (+ (.spam-count feature) (.ham-count feature)))))
+      (/ (+ (* weight assumed-probability)
+            (* data-points basic-probability))
+         (+ weight data-points))))
 
   (declare bayesian-spam-probability (FeatureDatabase -> WordFeature -> Double-Float))
-  (define bayesian-spam-probability (%bayesian-spam-probability 0.5d0 1))))
+  (define bayesian-spam-probability (%bayesian-spam-probability 0.5d0 1))
+
+  (declare inverse-chi-square (Double-Float -> Integer -> Double-Float))
+  (define (inverse-chi-square value degrees-of-freedom)
+    (min
+      
+      1.0)
+
+  (declare fisher ((List Double-Float) -> Integer -> Double-Float))
+  (define (fisher probs number-of-probs)
+    (inverse-chi-square
+     (* -2 (fold + (map log probs)))
+     (* 2 number-of-probs)))
+
+  (declare score ((List WordFeature) -> Double-Float))
+  (define (score features)
+    (let ((sum-probs
+           (fn (remaining spam-probs ham-probs number-of-probs)
+             (match remaining
+               ((Nil)
+                (let ((h (- 1 (fisher spam-probs number-of probs)))
+                      (s (- 1 (fisher ham-probs number-of-probs))))
+                  (/ (+ (- 1 h) s) 2.0d0)))
+               ((Cons feature new-remaining)
+                (if (untrained? feature)
+                    (sum-probs new-remaining spam-probs ham-probs number-of-probs)
+                    (let ((spam-prob (bayesian-spam-probability feature)))
+                      (sum-probs new-remaining
+                                 (Cons spam-prob spam-probs)
+                                 (Cons (- 1.0d0 spam-prob) spam-probs)
+                                 (1+ number-of-probs)))))))))
+      (sum-probs features Nil Nil 0))))
 
 (coalton-toplevel
 
@@ -146,7 +183,7 @@
 
 (coalton
   (trace-tuple
-    (run
-      (do
-        (train "hello how are you are you good?" Spam))
-      empty-database)))
+   (run
+     (do
+       (train "hello how are you are you good?" Spam))
+     empty-database)))
