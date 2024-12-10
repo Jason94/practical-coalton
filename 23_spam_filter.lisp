@@ -31,8 +31,8 @@
 
 (coalton-toplevel
 
-  (define MAX-HAM-SCORE 0.4)
-  (define MIN-SPAM-SCORE 0.6)
+  (define MAX-HAM-SCORE 0.4d0)
+  (define MIN-SPAM-SCORE 0.6d0)
 
   (define-type Classification
     Ham
@@ -79,16 +79,12 @@
   (declare empty-database FeatureDatabase)
   (define empty-database (FeatureDatabase m:empty 0 0))
 
-  (declare classification (Single-Float -> Classification))
+  (declare classification (Double-Float -> Classification))
   (define (classification score)
     (cond
      ((<= score MAX-HAM-SCORE) Ham)
      ((>= score MIN-SPAM-SCORE) Spam)
      (True Unsure)))
-
-  ; (declare classify (String -> Classification))
-  ; (define (classify text)
-  ;   (classification (score (extract-features text))))
 
   (declare extract-words (String -> (List String)))
   (define (extract-words text)
@@ -175,6 +171,13 @@
   (define (extract-features text)
     "Add a WordFeature for each word in TEXT to the database if it doesn't have them already."
     (sequence (map intern-feature (extract-words text))))
+
+  (declare classify (String -> (SpamState Classification)))
+  (define (classify text)
+    (do
+     (word-features <- (extract-features text))
+     (features-db <- get)
+     (pure (classification (score features-db word-features)))))
 
   (declare increment-count (Classification -> String -> (ST FeatureDatabase (Optional WordFeature))))
   (define (increment-count type word)
