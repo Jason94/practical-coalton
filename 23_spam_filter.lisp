@@ -219,7 +219,7 @@
 (coalton-toplevel
 
   (define-struct CorpusEntry
-    (filename String)
+    (filename f:Pathname)
     (type Classification))
 
   (define-type-alias Corpus (seq:Seq CorpusEntry))
@@ -232,15 +232,17 @@
     (let path = (the f:Pathname (into filename)))
     (do
      (corpus <- get)
-     (put (seq:push corpus (CorpusEntry filename type)))))
+     (put (seq:push corpus (CorpusEntry path type)))))
 
   (declare add-directory-to-corpus (String -> Classification -> (ST Corpus Unit)))
   (define (add-directory-to-corpus dir type)
     (match (f:directory-files dir)
       ((Err _) (pure))
       ((Ok files)
-       (sequence (map (fn (file) (add-file-to-corpus file type))
-                      files)))))
+       (do
+        (sequence (map (fn (file) (add-file-to-corpus file type))
+                       files))
+        (pure Unit)))))
 
   )
 
