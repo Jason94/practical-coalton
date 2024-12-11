@@ -16,7 +16,8 @@
    :negate)
   (:local-nicknames
    (#:m #:coalton-library/ord-map)
-   (#:o #:coalton-library/optional)))
+   (#:o #:coalton-library/optional)
+   (#:c #:coalton-library/cell)))
 (in-package :practical-coalton.spam-filter)
 
 (named-readtables:in-readtable coalton:coalton)
@@ -54,7 +55,6 @@
 
   (declare increment-feature (Classification -> WordFeature -> WordFeature))
   (define (increment-feature type feature)
-    (traceobject "type" type)
     (match feature
       ((WordFeature word spam-count ham-count)
        (match type
@@ -79,12 +79,14 @@
   (declare empty-database FeatureDatabase)
   (define empty-database (FeatureDatabase m:empty 0 0))
 
-  (declare classification (Double-Float -> Classification))
+  (declare classification (Double-Float -> (Tuple Classification Double-Float)))
   (define (classification score)
-    (cond
-     ((<= score MAX-HAM-SCORE) Ham)
-     ((>= score MIN-SPAM-SCORE) Spam)
-     (True Unsure)))
+    (Tuple
+     (cond
+       ((<= score MAX-HAM-SCORE) Ham)
+       ((>= score MIN-SPAM-SCORE) Spam)
+       (True Unsure))
+     score))
 
   (declare extract-words (String -> (List String)))
   (define (extract-words text)
@@ -120,18 +122,24 @@
       (cl:assert (cl:evenp degrees-of-freedom)))
     (let m = (/ value 2))
     (min
-     (fold + 0 (map (the (Integer -> Double-Float)
-                         (fn (i) (* (exp (negate m))
-                                    (if (zero? i)
-                                        1
-                                        (pow (/ m (fromint i)) (fromint i))))))
-                    (range 0 (1- (floor/ degrees-of-freedom 2)))))
-      1.0d0))
+     (let ((sum (c:new (exp (negate m))))
+           (prob (c:new (exp (negate m)))))
+       (when (> (inexact/ degrees-of-freedom 2) 1)
+         (for i in (range 1 (1- (/ (fromint degrees-of-freedom) 2.0d0)))
+           (c:update! (* (/ m i)) prob)
+           (c:update! (+ (c:read prob)) sum)
+           Unit))
+       (c:read sum))
+      1.0d0)))
 
+(coalton-toplevel
   (declare fisher ((List Double-Float) -> Integer -> Double-Float))
   (define (fisher probs number-of-probs)
     (inverse-chi-square
-     (* -2 (fold * 1d0 (map ln probs)))
+     (* -2 (fold (fn (sum prob)
+                   (+ sum (ln prob)))
+                 0d0
+                 probs))
      (* 2 number-of-probs)))
 
   (declare score (FeatureDatabase -> (List WordFeature) -> Double-Float))
@@ -149,7 +157,7 @@
                     (let ((spam-prob (bayesian-spam-probability feature-db feature)))
                       (sum-probs new-remaining
                                  (Cons spam-prob spam-probs)
-                                 (Cons (- 1.0d0 spam-prob) spam-probs)
+                                 (Cons (- 1.0d0 spam-prob) ham-probs)
                                  (1+ number-of-probs)))))))))
       (sum-probs features Nil Nil 0))))
 
@@ -172,7 +180,7 @@
     "Add a WordFeature for each word in TEXT to the database if it doesn't have them already."
     (sequence (map intern-feature (extract-words text))))
 
-  (declare classify (String -> (SpamState Classification)))
+  (declare classify (String -> (SpamState (Tuple Classification Double-Float))))
   (define (classify text)
     (do
      (word-features <- (extract-features text))
@@ -200,8 +208,10 @@
       (put (increment-total type db)))))
 
 (coalton
-  (trace-tuple
    (run
      (do
-       (train "hello how are you are you good?" Spam))
-     empty-database)))
+       (train "Make money fast" Spam)
+       (c1 <- (classify "Make money fast"))
+       (let _ = (trace-tuple c1))
+       (pure Unit))
+     empty-database))
