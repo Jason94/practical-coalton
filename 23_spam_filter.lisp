@@ -5,6 +5,7 @@
   (:use
    #:coalton
    #:coalton-prelude
+   #:coalton-library/classes
    #:coalton-library/list
    #:coalton-library/monad/state)
   (:import-from
@@ -15,9 +16,11 @@
    #:coalton-library/math/arith
    :negate)
   (:local-nicknames
+   (#:f #:coalton-library/file)
    (#:m #:coalton-library/ord-map)
    (#:o #:coalton-library/optional)
-   (#:c #:coalton-library/cell)))
+   (#:c #:coalton-library/cell)
+   (#:seq #:coalton-library/seq)))
 (in-package :practical-coalton.spam-filter)
 
 (named-readtables:in-readtable coalton:coalton)
@@ -161,9 +164,11 @@
                                  (1+ number-of-probs)))))))))
       (sum-probs features Nil Nil 0))))
 
-(coalton-toplevel
+;;;
+;;; Build a feature database
+;;;
 
-  (define-type-alias (SpamState :a) (ST FeatureDatabase :a))
+(coalton-toplevel
 
   (declare intern-feature (String -> (ST FeatureDatabase WordFeature)))
   (define (intern-feature word)
@@ -180,7 +185,7 @@
     "Add a WordFeature for each word in TEXT to the database if it doesn't have them already."
     (sequence (map intern-feature (extract-words text))))
 
-  (declare classify (String -> (SpamState (Tuple Classification Double-Float))))
+  (declare classify (String -> (ST FeatureDatabase (Tuple Classification Double-Float))))
   (define (classify text)
     (do
      (word-features <- (extract-features text))
@@ -206,6 +211,47 @@
       (sequence (map (increment-count type) words))
       (db <- get)
       (put (increment-total type db)))))
+
+;;;
+;;; Building a corpus
+;;;
+
+(coalton-toplevel
+
+  (define-struct CorpusEntry
+    (filename String)
+    (type Classification))
+
+  (define-type-alias Corpus (seq:Seq CorpusEntry))
+
+  (declare new-corpus Corpus)
+  (define new-corpus (seq:new))
+
+  (declare add-file-to-corpus ((Into :a f:Pathname) => :a -> Classification -> (ST Corpus Unit)))
+  (define (add-file-to-corpus filename type)
+    (let path = (the f:Pathname (into filename)))
+    (do
+     (corpus <- get)
+     (put (seq:push corpus (CorpusEntry filename type)))))
+
+  (declare add-directory-to-corpus (String -> Classification -> (ST Corpus Unit)))
+  (define (add-directory-to-corpus dir type)
+    (match (f:directory-files dir)
+      ((Err _) (pure))
+      ((Ok files)
+       (sequence (map (fn (file) (add-file-to-corpus file type))
+                      files)))))
+
+  )
+
+(coalton
+ (trace-tuple
+  (run
+   (do
+    (add-file-to-corpus "test.txt" Ham)
+    (add-file-to-corpus "bad.txt" Spam)
+    (add-directory-to-corpus "data/" Ham))
+   new-corpus)))
 
 (coalton
    (run
