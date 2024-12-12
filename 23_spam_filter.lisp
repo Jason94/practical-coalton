@@ -70,6 +70,9 @@
     (total-hams Integer)
     (total-spams Integer))
 
+  (declare empty-database FeatureDatabase)
+  (define empty-database (FeatureDatabase m:empty 0 0))
+
   (declare increment-total (Classification -> FeatureDatabase -> FeatureDatabase))
   (define (increment-total type feature-database)
     (match feature-database
@@ -78,9 +81,6 @@
          ((Unsure) feature-database)
          ((Ham) (FeatureDatabase db (1+ total-hams) total-spams))
          ((Spam) (FeatureDatabase db total-hams (1+ total-spams)))))))
-
-  (declare empty-database FeatureDatabase)
-  (define empty-database (FeatureDatabase m:empty 0 0))
 
   (declare classification (Double-Float -> (Tuple Classification Double-Float)))
   (define (classification score)
@@ -165,55 +165,7 @@
       (sum-probs features Nil Nil 0))))
 
 ;;;
-;;; Build a feature database
-;;;
-
-(coalton-toplevel
-
-  (declare intern-feature (String -> (ST FeatureDatabase WordFeature)))
-  (define (intern-feature word)
-    "Add a WordFeature for WORD to the database if it doesn't have one already."
-    (do
-      ((FeatureDatabase db total-hams total-spams) <- get)
-      (let updated-db = (with-default db (m:insert db word (new-word-feature word))))
-      (let feature = (from-some "Error inserting feature" (m:lookup updated-db word)))
-      (put (FeatureDatabase updated-db total-hams total-spams))
-      (pure feature)))
-
-  (declare extract-features (String -> (ST FeatureDatabase (List WordFeature))))
-  (define (extract-features text)
-    "Add a WordFeature for each word in TEXT to the database if it doesn't have them already."
-    (sequence (map intern-feature (extract-words text))))
-
-  (declare classify (String -> (ST FeatureDatabase (Tuple Classification Double-Float))))
-  (define (classify text)
-    (do
-     (word-features <- (extract-features text))
-     (features-db <- get)
-     (pure (classification (score features-db word-features)))))
-
-  (declare increment-count (Classification -> String -> (ST FeatureDatabase (Optional WordFeature))))
-  (define (increment-count type word)
-    (do
-      ((FeatureDatabase db total-hams total-spams) <- get)
-      (let updated-map = (with-default db (m:update (increment-feature type)
-                                                    db
-                                                    word)))
-      (put (FeatureDatabase updated-map total-hams total-spams))
-      (pure (m:lookup updated-map word))))
-
-  (declare train (String -> Classification -> (ST FeatureDatabase Unit)))
-  (define (train text type)
-    "Train the filter to associate each word in TEXT with the classification TYPE."
-    (do
-      (word-features <- (extract-features text))
-      (let words = (map .word word-features))
-      (sequence (map (increment-count type) words))
-      (db <- get)
-      (put (increment-total type db)))))
-
-;;;
-;;; Building a corpus
+;;; Defining the application state
 ;;;
 
 (coalton-toplevel
@@ -227,39 +179,163 @@
   (declare new-corpus Corpus)
   (define new-corpus (seq:new))
 
-  (declare add-file-to-corpus ((Into :a f:Pathname) => :a -> Classification -> (ST Corpus Unit)))
+  (define-struct SpamState
+    (db FeatureDatabase)
+    (corpus Corpus))
+
+  (declare new-spam-state SpamState)
+  (define new-spam-state (SpamState empty-database new-corpus))
+
+  (define-type-alias (SpamStateM :a) (ST SpamState :a))
+
+  (declare get-db (SpamStateM FeatureDatabase))
+  (define get-db
+    (do
+     ((SpamState db _) <- get)
+     (pure db)))
+
+  (declare put-db (FeatureDatabase -> (SpamStateM Unit)))
+  (define (put-db db)
+    (do
+     ((SpamState _ corpus) <- get)
+     (put (SpamState db corpus))))
+
+  (declare get-corpus (SpamStateM Corpus))
+  (define get-corpus
+    (do
+     ((SpamState _ corpus) <- get)
+     (pure corpus)))
+
+  (declare put-corpus (Corpus -> (SpamStateM Unit)))
+  (define (put-corpus corpus)
+    (do
+     ((SpamState db _) <- get)
+     (put (SpamState db corpus)))))
+
+;;;
+;;; Working with a feature database
+;;;
+
+(coalton-toplevel
+  (declare intern-feature (String -> (SpamStateM WordFeature)))
+  (define (intern-feature word)
+    "Add a WordFeature for WORD to the database if it doesn't have one already."
+    (do
+      ((FeatureDatabase db total-hams total-spams) <- get-db)
+      (let updated-db = (with-default db (m:insert db word (new-word-feature word))))
+      (let feature = (from-some "Error inserting feature" (m:lookup updated-db word)))
+      (put-db (FeatureDatabase updated-db total-hams total-spams))
+      (pure feature)))
+
+  (declare extract-features (String -> (SpamStateM (List WordFeature))))
+  (define (extract-features text)
+    "Add a WordFeature for each word in TEXT to the database if it doesn't have them already."
+    (sequence (map intern-feature (extract-words text))))
+
+  (declare classify (String -> (SpamStateM (Tuple Classification Double-Float))))
+  (define (classify text)
+    (do
+     (word-features <- (extract-features text))
+     (features-db <- get-db)
+     (pure (classification (score features-db word-features)))))
+
+  (declare increment-count (Classification -> String -> (SpamStateM (Optional WordFeature))))
+  (define (increment-count type word)
+    (do
+      ((FeatureDatabase db total-hams total-spams) <- get-db)
+      (let updated-map = (with-default db (m:update (increment-feature type)
+                                                    db
+                                                    word)))
+      (put-db (FeatureDatabase updated-map total-hams total-spams))
+      (pure (m:lookup updated-map word))))
+
+  (declare train (String -> Classification -> (SpamStateM Unit)))
+  (define (train text type)
+    "Train the filter to associate each word in TEXT with the classification TYPE."
+    (do
+      (word-features <- (extract-features text))
+      (let words = (map .word word-features))
+      (sequence (map (increment-count type) words))
+      (db <- get-db)
+      (put-db (increment-total type db)))))
+
+;;;
+;;; Building a corpus
+;;;
+
+(coalton-toplevel
+
+  (declare add-file-to-corpus ((Into :a f:Pathname) => :a -> Classification -> (SpamStateM Unit)))
   (define (add-file-to-corpus filename type)
     (let path = (the f:Pathname (into filename)))
     (do
-     (corpus <- get)
-     (put (seq:push corpus (CorpusEntry path type)))))
+     (corpus <- get-corpus)
+     (put-corpus (seq:push corpus (CorpusEntry path type)))))
 
-  (declare add-directory-to-corpus (String -> Classification -> (ST Corpus Unit)))
+  (declare add-directory-to-corpus (String -> Classification -> (SpamStateM Unit)))
   (define (add-directory-to-corpus dir type)
     (match (f:directory-files dir)
-      ((Err _) (pure))
+      ((Err msg)
+       (traceobject "File error message" msg)
+       (pure))
       ((Ok files)
        (do
         (sequence (map (fn (file) (add-file-to-corpus file type))
                        files))
         (pure Unit)))))
 
+  (declare start-of-file (f:Pathname -> (Optional Integer) -> String))
+  (define (start-of-file filename max-chars?)
+    (let ((max-charsp (some? max-chars?))
+          (max-chars (with-default -1 max-chars?)))
+      (lisp String (filename max-charsp max-chars)
+        (cl:with-open-file (in filename)
+          (cl:let* ((text-length (cl:if max-charsp
+                                   (cl:min (cl:file-length in) max-chars)
+                                   (cl:file-length in)))
+                    (text (cl:make-string text-length))
+                    (read (cl:read-sequence text in)))
+            (cl:if (cl:< read text-length)
+                   (cl:subseq text 0 read)
+                   text))))))
+
+  (define-struct TestResult
+    (corpus-entry CorpusEntry)
+    (classification Classification)
+    (score Double-Float))
+
+  (declare test-from-corpus ((Optional UFix) -> (Optional UFix) -> (SpamStateM (List TestResult))))
+  (define (test-from-corpus start? end?)
+    (do
+     (corpus <- get-corpus)
+     (let start = (with-default 0 start?))
+      (let end = (with-default (seq:size corpus) end?))
+      (sequence (map
+                 (fn (i)
+                   (do
+                    (let corpus-entry = (from-some "Unreachable - i always in corpus" (seq:get corpus i)))
+                    ((Tuple classification score) <- (classify (start-of-file (.filename corpus-entry) None)))
+                    (pure (TestResult corpus-entry classification score))))
+                 (range start (1- end))))))
+
+
   )
 
-(coalton
- (trace-tuple
-  (run
-   (do
-    (add-file-to-corpus "test.txt" Ham)
-    (add-file-to-corpus "bad.txt" Spam)
-    (add-directory-to-corpus "data/" Ham))
-   new-corpus)))
-
-(coalton
-   (run
+(cl:defun test-corpus ()
+  (coalton
+   (trace-tuple
+    (run
      (do
-       (train "Make money fast" Spam)
-       (c1 <- (classify "Make money fast"))
-       (let _ = (trace-tuple c1))
-       (pure Unit))
-     empty-database))
+      (add-file-to-corpus "test.txt" Ham)
+      (add-file-to-corpus "bad.txt" Spam)
+      (add-directory-to-corpus "spam_data/" Ham)
+      (test-from-corpus None None))
+     new-spam-state))))
+;; (coalton
+;;    (run
+;;      (do
+;;        (train "Make money fast" Spam)
+;;        (c1 <- (classify "Make money fast"))
+;;        (let _ = (trace-tuple c1))
+;;        (pure Unit))
+;;      empty-database))
