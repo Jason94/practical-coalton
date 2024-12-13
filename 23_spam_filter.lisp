@@ -33,6 +33,16 @@
         (traceobject "a" a)
         (traceobject "b" b))))))
 
+;;;
+;;; Utility Functions
+;;;
+
+(coalton-toplevel
+  ;; TODO: Implement this when the Seq interface improves
+  (declare shuffle-seq ((seq:Seq :a) -> (seq:Seq :a)))
+  (define (shuffle-seq seq)
+    seq))
+
 (coalton-toplevel
 
   (define MAX-HAM-SCORE 0.4d0)
@@ -174,10 +184,10 @@
     (filename f:Pathname)
     (type Classification))
 
-  (define-type-alias Corpus (seq:Seq CorpusEntry))
+  (define-type-alias Corpus (List CorpusEntry))
 
   (declare new-corpus Corpus)
-  (define new-corpus (seq:new))
+  (define new-corpus Nil)
 
   (define-struct SpamState
     (db FeatureDatabase)
@@ -270,7 +280,7 @@
     (let path = (the f:Pathname (into filename)))
     (do
      (corpus <- get-corpus)
-     (put-corpus (seq:push corpus (CorpusEntry path type)))))
+     (put-corpus (Cons (CorpusEntry path type) corpus))))
 
   (declare add-directory-to-corpus (String -> Classification -> (SpamStateM Unit)))
   (define (add-directory-to-corpus dir type)
@@ -304,22 +314,63 @@
     (classification Classification)
     (score Double-Float))
 
+  (repr :enum)
+  (define-type ResultType
+    Correct False-Positive False-Negative Missed-Ham Missed-Spam)
+
+  (declare result-type (TestResult -> ResultType))
+  (define (result-type result)
+    (match (Tuple (.type (.corpus-entry result)) (.classification result))
+      ((Tuple (Ham)  (Ham))    Correct)
+      ((Tuple (Ham)  (Spam))   False-Positive)
+      ((Tuple (Ham)  (Unsure)) Missed-Ham)
+      ((Tuple (Spam) (Ham))    False-Negative)
+      ((Tuple (Spam) (Spam))   Correct)
+      ((Tuple (Spam) (Unsure)) Missed-Spam)
+      (_                       Missed-Spam))) ;; TODO: Error here
+
   (declare test-from-corpus ((Optional UFix) -> (Optional UFix) -> (SpamStateM (List TestResult))))
   (define (test-from-corpus start? end?)
+    "Test a corpus from START? (inclusive) to END? (exclusive)."
     (do
      (corpus <- get-corpus)
      (let start = (with-default 0 start?))
-      (let end = (with-default (seq:size corpus) end?))
-      (sequence (map
-                 (fn (i)
-                   (do
-                    (let corpus-entry = (from-some "Unreachable - i always in corpus" (seq:get corpus i)))
-                    ((Tuple classification score) <- (classify (start-of-file (.filename corpus-entry) None)))
+     (let end = (with-default (length corpus) end?))
+     (sequence (map
+                (fn (corpus-entry)
+                  (do
+                   ((Tuple classification score) <- (classify (start-of-file (.filename corpus-entry) None)))
                     (pure (TestResult corpus-entry classification score))))
-                 (range start (1- end))))))
+                (take (- end start) (drop start corpus))))))
 
+  (declare train-from-corpus ((Optional UFix) -> (Optional UFix) -> SpamStateM Unit))
+  (define (train-from-corpus start? end?)
+    "Train a corpus from START? (inclusive) to END? (exclusive)."
+    (do
+     (corpus <- get-corpus)
+     (let start = (with-default 0 start?))
+     (let end = (with-default (length corpus) end?))
+     (sequence
+      (map
+       (fn (corpus-entry)
+         (train (start-of-file (.filename corpus-entry) None) (.type corpus-entry)))
+       (take (- end start) (drop start corpus))))
+      (pure Unit))))
 
-  )
+(coalton-toplevel
+  ;; TODO: Shuffle this
+  (declare test-classifier (Double-Float -> (SpamStateM (List TestResult))))
+  (define (test-classifier testing-proportion)
+    "Train and test a database against the corpus in the state."
+    (do
+     (put-db empty-database)
+     (corpus-size <- (map length get-corpus))
+     ;; TODO: Get this working in Coalton???
+     ;; (let train-on = (the UFix (floor (* corpus-size (- 1.0d0 testing-proportion)))))
+     (let train-on = (lisp UFix (corpus-size testing-proportion)
+                       (cl:floor (cl:* corpus-size (cl:- 1 testing-proportion)))))
+     (train-from-corpus (Some 0) (Some train-on))
+     (test-from-corpus (Some train-on) None))))
 
 (cl:defun test-corpus ()
   (coalton
@@ -329,13 +380,15 @@
       (add-file-to-corpus "test.txt" Ham)
       (add-file-to-corpus "bad.txt" Spam)
       (add-directory-to-corpus "spam_data/" Ham)
-      (test-from-corpus None None))
+      (map (map result-type) (test-classifier 0.8d0)))
      new-spam-state))))
-;; (coalton
-;;    (run
-;;      (do
-;;        (train "Make money fast" Spam)
-;;        (c1 <- (classify "Make money fast"))
-;;        (let _ = (trace-tuple c1))
-;;        (pure Unit))
-;;      empty-database))
+
+(cl:defun test-train-classify ()
+  (coalton
+   (run
+    (do
+     (train "Make money fast" Spam)
+     (c1 <- (classify "Make money fast"))
+      (let _ = (trace-tuple c1))
+      (pure Unit))
+    new-spam-state)))
