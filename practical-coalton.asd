@@ -19,6 +19,8 @@
   :description "A port of Peter Seibel's Practical Common Lisp to Coalton."
   :depends-on (#:pcl-pathnames
                #:alexandria
+               #:cl-ppcre
                #:coalton)
   :components ((:file "1_simple_database")
-               (:file "15_pathnames")))
+               (:file "15_pathnames")
+               (:file "23_spam_filter")))

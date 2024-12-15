@@ -1,0 +1,3 @@
+*.fasl
+.vscode/
+ch_23_corpus/
