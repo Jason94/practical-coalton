@@ -20,28 +20,53 @@
    (#:m #:coalton-library/ord-map)
    (#:o #:coalton-library/optional)
    (#:c #:coalton-library/cell)
+   (#:h #:coalton-library/hash)
+   (#:ht #:coalton-library/hashtable)
    (#:seq #:coalton-library/seq)))
 (in-package :practical-coalton.spam-filter)
 
 (named-readtables:in-readtable coalton:coalton)
 
 (coalton-toplevel
-  (define (trace-tuple tup)
+  (define (trace-tuple label-a label-b tup)
     (match tup
       ((Tuple a b)
        (progn
-        (traceobject "a" a)
-        (traceobject "b" b))))))
+        (traceobject label-a a)
+        (traceobject label-b b))))))
 
 ;;;
 ;;; Utility Functions
 ;;;
 
+(cl:defmacro define-enum-eq (type cl:&rest values)
+  `(define-instance (Eq ,type)
+     (define (== a b)
+       (match (Tuple a b)
+         ,@(cl:mapcar (cl:lambda (val)
+                        `((Tuple (,val) (,val)) True))
+                      values)
+         (_ False)))))
+
+(cl:defmacro define-enum-hash (type cl:&rest values)
+  `(define-instance (Hash ,type)
+     (define (hash x)
+       (match x
+         ,@(cl:loop :for val :in values
+                    :for i := 0 :then (cl:1+ i)
+                    :collect `((,val) (lisp Hash () ,i)))))))
+
 (coalton-toplevel
   ;; TODO: Implement this when the Seq interface improves
   (declare shuffle-seq ((seq:Seq :a) -> (seq:Seq :a)))
   (define (shuffle-seq seq)
-    seq))
+    seq)
+
+  (declare inc-hashtable ((Hash :a) => (ht:Hashtable :a Integer) -> :a -> Unit))
+  (define (inc-hashtable table elt)
+    "Increment the count of ELT. If it is not present in TABLE, set it to 1."
+    (ht:set! table elt (with-default 1 (map 1+ (ht:get table elt))))
+    Unit))
 
 (coalton-toplevel
 
@@ -299,16 +324,26 @@
     (let ((max-charsp (some? max-chars?))
           (max-chars (with-default -1 max-chars?)))
       (lisp String (filename max-charsp max-chars)
-        (cl:with-open-file (in filename)
-          (cl:let* ((text-length (cl:if max-charsp
-                                   (cl:min (cl:file-length in) max-chars)
-                                   (cl:file-length in)))
-                    (text (cl:make-string text-length))
-                    (read (cl:read-sequence text in)))
-            (cl:if (cl:< read text-length)
-                   (cl:subseq text 0 read)
-                   text))))))
+        (cl:labels ((load-file ()
+                      (cl:with-open-file (in filename :external-format (cl:list :utf-8 :replacement #\?))
+                        (cl:let* ((text-length (cl:if max-charsp
+                                                      (cl:min (cl:file-length in) max-chars)
+                                                      (cl:file-length in)))
+                                  (text (cl:make-string text-length))
+                                  (read (cl:read-sequence text in)))
+                          (cl:if (cl:< read text-length)
+                                 (cl:subseq text 0 read)
+                                 text)))))
+          (cl:handler-case (load-file)
+            (cl:error (c)
+              (cl:format cl:t "Error [~a] loading file ~a~%" c filename)
+              "")))))))
 
+;;;
+;;; Using a corpus
+;;;
+
+(coalton-toplevel
   (define-struct TestResult
     (corpus-entry CorpusEntry)
     (classification Classification)
@@ -317,6 +352,9 @@
   (repr :enum)
   (define-type ResultType
     Correct False-Positive False-Negative Missed-Ham Missed-Spam)
+
+  (define-enum-eq   ResultType Correct False-Positive False-Negative Missed-Ham Missed-Spam)
+  (define-enum-hash ResultType Correct False-Positive False-Negative Missed-Ham Missed-Spam)
 
   (declare result-type (TestResult -> ResultType))
   (define (result-type result)
@@ -327,7 +365,11 @@
       ((Tuple (Spam) (Ham))    False-Negative)
       ((Tuple (Spam) (Spam))   Correct)
       ((Tuple (Spam) (Unsure)) Missed-Spam)
-      (_                       Missed-Spam))) ;; TODO: Error here
+      ((Tuple _      _)        (error "Invalid corpus entry"))))
+
+  (declare matches-result-type? (ResultType -> TestResult -> Boolean))
+  (define (matches-result-type? result test-result)
+    (== result(result-type test-result)))
 
   (declare test-from-corpus ((Optional UFix) -> (Optional UFix) -> (SpamStateM (List TestResult))))
   (define (test-from-corpus start? end?)
@@ -357,6 +399,10 @@
        (take (- end start) (drop start corpus))))
       (pure Unit))))
 
+;;;
+;;; Toplevel functions to make and analyse train/eval pass on directories.
+;;;
+
 (coalton-toplevel
   ;; TODO: Shuffle this
   (declare test-classifier (Double-Float -> (SpamStateM (List TestResult))))
@@ -370,25 +416,54 @@
      (let train-on = (lisp UFix (corpus-size testing-proportion)
                        (cl:floor (cl:* corpus-size (cl:- 1 testing-proportion)))))
      (train-from-corpus (Some 0) (Some train-on))
-     (test-from-corpus (Some train-on) None))))
+     (test-from-corpus (Some train-on) None)))
+
+  (declare analyze-results ((List TestResult) -> Unit))
+  (define (analyze-results results)
+    (let total = (c:new 0))
+    (let counts = (ht:new))
+    (for item in results
+      (c:increment! total)
+      (inc-hashtable counts (result-type item)))
+    (let total-count = (c:read total))
+    (lisp :a (total-count)
+      (cl:format cl:t "~&~@(~a~):~40t~5d~,5t: ~6,2f%~%" "Total" total-count 100))
+    (for (Tuple result count) in (ht:entries counts)
+      (lisp :a (result count total-count)
+        (cl:format cl:t "~&~@(~a~):~40t~5d~,5t: ~6,2f%~%"
+                   result count (cl:* 100 (cl:/ count total-count)))))
+    Unit))
+
+;;;
+;;; Example usage functions
+;;;
 
 (cl:defun test-corpus ()
   (coalton
-   (trace-tuple
-    (run
-     (do
-      (add-file-to-corpus "test.txt" Ham)
-      (add-file-to-corpus "bad.txt" Spam)
-      (add-directory-to-corpus "spam_data/" Ham)
-      (map (map result-type) (test-classifier 0.8d0)))
-     new-spam-state))))
+   (progn
+     (let (Tuple _ results) =
+       (run
+        (do
+         ;; A small corpus of 10 ham and 10 spam files is included in the repository.
+         ;; You can the full corpus from:
+         ;; https://spamassassin.apache.org/old/publiccorpus/
+         ;; (add-directory-to-corpus "ch_23_corpus/easy_ham_2/" Ham)
+         ;; (add-directory-to-corpus "ch_23_corpus/hard_ham/" Ham)
+         ;; (add-directory-to-corpus "ch_23_corpus/spam_2/" Spam)
+         ;; (add-directory-to-corpus "ch_23_corpus/spam_2b/" Spam)
+         (add-directory-to-corpus "ch_23_test_spam_corpus/ham/" Ham)
+         (add-directory-to-corpus "ch_23_test_spam_corpus/spam/" Spam)
+         (test-classifier 0.8d0))
+        new-spam-state))
+     (analyze-results results))))
 
-(cl:defun test-train-classify ()
+(cl:defun manually-train ()
   (coalton
-   (run
-    (do
-     (train "Make money fast" Spam)
-     (c1 <- (classify "Make money fast"))
-      (let _ = (trace-tuple c1))
-      (pure Unit))
-    new-spam-state)))
+   (trace-tuple "State" "Result (Classification Score)"
+     (run
+      (do
+       (train "Make money fast" Spam)
+       (train "Want to buy a boat???" Spam)
+       (train "Don't forget grandma's birthday!" Ham)
+       (classify "Want to make money so you can buy a boat for grandma's birthday?"))
+      new-spam-state))))
