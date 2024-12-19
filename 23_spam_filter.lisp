@@ -26,12 +26,9 @@
 (named-readtables:in-readtable coalton:coalton)
 
 (coalton-toplevel
-  (define (trace-tuple tup)
-    (match tup
-      ((Tuple a b)
-       (progn
-        (traceobject "a" a)
-        (traceobject "b" b))))))
+  (define (trace-tuple (Tuple a b))
+    (traceobject "a" a)
+    (traceobject "b" b)))
 
 ;;;
 ;;; Utility Functions
